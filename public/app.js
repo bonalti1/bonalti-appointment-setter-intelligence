@@ -985,9 +985,9 @@ function renderCallAnalysisTracker() {
     : state.activityTracker.label || "Today";
   els.callAnalysisTracker.innerHTML = `
     <article><span>Inbound Messages</span><strong>${fmt(stats.inboundMessages)}</strong></article>
-    <article><span>Inbound Calls</span><strong>${fmt(stats.inboundCalls)}</strong></article>
+    <article><span>Incoming Calls</span><strong>${fmt(stats.inboundCalls)}</strong></article>
     <article><span>Outbound Messages</span><strong>${fmt(stats.outboundMessages)}</strong></article>
-    <article><span>Outbound Calls Made</span><strong>${fmt(stats.outboundCalls)}</strong></article>
+    <article><span>Outgoing Calls Made</span><strong>${fmt(stats.outboundCalls)}</strong></article>
     <article class="wide"><span>${escapeHtml(label)} · Last saved</span><strong>${escapeHtml(state.latestSavedLabel)}</strong></article>
   `;
 }
@@ -1054,9 +1054,9 @@ function buildActivityDirectionStats(items) {
 
 function callDirectionLabel(item) {
   const direction = String(item.direction || "").toLowerCase();
-  if (direction.includes("inbound")) return "Inbound Call";
-  if (direction.includes("outbound")) return "Outbound Call";
-  return "Unknown Direction Call";
+  if (direction.includes("inbound")) return "Incoming Call";
+  if (direction.includes("outbound")) return "Outgoing Call";
+  return "Unknown Call Direction";
 }
 
 function renderNoClientTranscriptMatch(client) {
@@ -1166,6 +1166,10 @@ function renderSummaryTab(item) {
         <strong>${escapeHtml(review.hasAi ? (intelligence.whatHappened || review.longSummary) : review.summary)}</strong>
       </div>
       <div class="summary-grid call-analysis-summary-grid">
+        <div>
+          <span>Call type</span>
+          <strong>${escapeHtml(callDirectionLabel(item))}</strong>
+        </div>
         <div>
           <span>Main objective</span>
           <strong>${escapeHtml(mainObjective)}</strong>
