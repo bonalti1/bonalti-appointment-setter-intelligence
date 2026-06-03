@@ -1429,6 +1429,62 @@ input[type="search"] {
   margin: 6px 0 0;
 }
 
+.call-analysis-summary-grid {
+  grid-template-columns: 1fr;
+}
+
+.lead-quality-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 14px;
+}
+
+.lead-quality-card > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lead-quality-card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lead-quality-card strong {
+  font-size: 18px;
+}
+
+.lead-quality-card p {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.lead-quality-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.lead-quality-high {
+  border-top: 3px solid #2f9e44;
+}
+
+.lead-quality-medium {
+  border-top: 3px solid #d99a21;
+}
+
+.lead-quality-low {
+  border-top: 3px solid #d14b4b;
+}
+
 .daily-report {
   margin-top: 14px;
   border: 1px solid var(--line);

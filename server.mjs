@@ -994,6 +994,7 @@ async function generateAiReview(transcript) {
             "If the transcript does not prove something, say it is unclear.",
             "Do not invent names, outcomes, objections, promises, appointment statuses, or lead intent.",
             "Do not score, grade, pass, or fail the setter.",
+            "For lead_quality, base the label only on buying-readiness signals in the transcript: land/property, financing or budget, timeline, project specificity, and willingness to meet or take a next step.",
             "Classify objections by meaning, not by keywords only.",
             "Keep the output short, direct, and useful for a nontechnical appointment-setting leader."
           ].join(" ")
@@ -1021,6 +1022,9 @@ async function generateAiReview(transcript) {
               "summary",
               "what_happened",
               "follow_up_needed",
+              "lead_quality",
+              "lead_quality_reason",
+              "lead_quality_signals",
               "main_objections",
               "recommended_next_action",
               "confidence",
@@ -1030,6 +1034,13 @@ async function generateAiReview(transcript) {
               summary: { type: "string" },
               what_happened: { type: "string" },
               follow_up_needed: { type: "string" },
+              lead_quality: { type: "string", enum: ["High", "Medium", "Low", "Unclear"] },
+              lead_quality_reason: { type: "string" },
+              lead_quality_signals: {
+                type: "array",
+                items: { type: "string" },
+                maxItems: 4
+              },
               main_objections: {
                 type: "array",
                 items: {
@@ -1296,7 +1307,9 @@ function formatAiSummary(review) {
   const lines = [
     review.summary ? `Summary: ${cleanText(review.summary)}` : "",
     review.what_happened ? `What happened: ${cleanText(review.what_happened)}` : "",
-    review.follow_up_needed ? `Follow-up needed: ${cleanText(review.follow_up_needed)}` : "",
+    review.lead_quality ? `Lead quality: ${cleanText(review.lead_quality)}` : "",
+    review.lead_quality_reason ? `Lead quality reason: ${cleanText(review.lead_quality_reason)}` : "",
+    Array.isArray(review.lead_quality_signals) && review.lead_quality_signals.length ? `Lead quality signals: ${review.lead_quality_signals.map((item) => cleanText(item)).filter(Boolean).join("; ")}` : "",
     review.confidence ? `Confidence: ${cleanText(review.confidence)}` : "",
     review.not_enough_information ? "Some details were unclear from the transcript." : ""
   ].filter(Boolean);

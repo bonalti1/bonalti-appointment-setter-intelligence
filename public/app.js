@@ -321,9 +321,9 @@ function renderDatePresetControls() {
 
 function dateRangeForPreset(preset) {
   const today = new Date();
-  if (preset === "yesterday") {
-    const date = addDays(today, -1);
-    return { from: dateInputValue(date), to: dateInputValue(date) };
+  if (preset === "this-month") {
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { from: dateInputValue(first), to: dateInputValue(today) };
   }
 
   if (preset === "last-month") {
@@ -902,7 +902,6 @@ function renderTranscriptWorkspace() {
       </div>
       <small>${escapeHtml(activityPreview(item))}</small>
       <div class="call-tags">
-        ${item.review?.needsFollowUp ? `<span class="call-tag">Follow-up</span>` : ""}
         ${(item.review?.objections || []).slice(0, 2).map((objection) => `<span class="call-tag">${escapeHtml(objection)}</span>`).join("")}
       </div>
     </button>
@@ -946,15 +945,13 @@ function renderModeFilters() {
   if (state.reviewMode === "calls") {
     return [
       reviewFilterButton("all", "All Calls"),
-      reviewFilterButton("follow-up", "Follow-up"),
       reviewFilterButton("ai", "AI notes"),
       reviewFilterButton("needs-ai", "Needs AI")
     ].join("");
   }
 
   return [
-    reviewFilterButton("all", "All Calls"),
-    reviewFilterButton("follow-up", "Follow-up")
+    reviewFilterButton("all", "All Calls")
   ].join("");
 }
 
@@ -1093,14 +1090,13 @@ function renderSelectedTranscript(item) {
     return;
   }
 
+  if (state.transcriptDetailTab === "follow-up") state.transcriptDetailTab = "summary";
   const activeTab = state.transcriptDetailTab || "summary";
   const tabBody = activeTab === "summary"
     ? renderSummaryTab(item)
     : activeTab === "transcript"
       ? renderTranscriptTab(item)
-      : activeTab === "follow-up"
-        ? renderFollowUpTab(item)
-        : renderNotesTab(item);
+      : renderNotesTab(item);
 
   els.callDetail.innerHTML = `
     <article class="transcript-card ${item.review.qualityScore >= 82 ? "high-score" : item.review.qualityScore < 65 ? "needs-work" : ""}">
@@ -1122,7 +1118,6 @@ function renderSelectedTranscript(item) {
         <button class="${activeTab === "summary" ? "active" : ""}" data-detail-tab="summary">Summary</button>
         <button class="${activeTab === "transcript" ? "active" : ""}" data-detail-tab="transcript">Transcript / Spanish</button>
         <button class="${activeTab === "notes" ? "active" : ""}" data-detail-tab="notes">AI Notes</button>
-        <button class="${activeTab === "follow-up" ? "active" : ""}" data-detail-tab="follow-up">Follow-Up</button>
       </div>
       ${tabBody}
     </article>
@@ -1162,28 +1157,136 @@ function renderSelectedTranscript(item) {
 function renderSummaryTab(item) {
   const review = item.review;
   const intelligence = review.intelligence || {};
+  const leadQuality = getLeadQuality(item);
+  const mainObjective = getMainObjective(item);
   return `
     <section class="conversation-summary">
       <div class="summary-main">
         <span>What happened</span>
         <strong>${escapeHtml(review.hasAi ? (intelligence.whatHappened || review.longSummary) : review.summary)}</strong>
       </div>
-      <div class="summary-grid">
+      <div class="summary-grid call-analysis-summary-grid">
         <div>
-          <span>Main objection</span>
-          <strong>${escapeHtml(review.objections[0] || "None found")}</strong>
-        </div>
-        <div>
-          <span>Follow-up</span>
-          <strong>${escapeHtml(intelligence.followUpNeeded || (review.needsFollowUp ? "Needs action" : "No urgent action"))}</strong>
+          <span>Main objective</span>
+          <strong>${escapeHtml(mainObjective)}</strong>
         </div>
       </div>
-      <div class="summary-next-action">
-        <span>Recommended next action</span>
-        <strong>${escapeHtml(review.nextAction)}</strong>
+      <div class="lead-quality-card ${leadQuality.levelClass}">
+        <div>
+          <span>Lead Quality</span>
+          <strong>${escapeHtml(leadQuality.level)}</strong>
+        </div>
+        <p>${escapeHtml(leadQuality.reason)}</p>
+        <ul>
+          ${leadQuality.signals.map((signal) => `<li>${escapeHtml(signal)}</li>`).join("")}
+        </ul>
       </div>
     </section>
   `;
+}
+
+function getMainObjective(item) {
+  const text = normalizeForReview(`${item.transcriptText || ""} ${item.review?.summary || ""} ${item.review?.longSummary || ""}`);
+  if (/financ|credito|crédito|prestamo|pr[eé]stamo|lender|preapproval|pre-aprob/.test(text)) {
+    return "Understand financing or lender options.";
+  }
+  if (/cita|agendada|appointment|meeting|visita/.test(text)) {
+    return "Confirm or prepare for an appointment.";
+  }
+  if (/precio|costo|cost|price|cu[aá]nto|presupuesto|budget/.test(text)) {
+    return "Understand price, budget, or affordability.";
+  }
+  if (/terreno|land|property|acre|planos|constru|casa|home/.test(text)) {
+    return "Discuss a possible construction project.";
+  }
+  if (/informaci[oó]n|information|pregunta|question/.test(text)) {
+    return "Gather basic information.";
+  }
+  return item.review?.objections?.[0] ? `Clarify ${item.review.objections[0].toLowerCase()} concern.` : "Objective unclear from the saved transcript.";
+}
+
+function getLeadQuality(item) {
+  const intelligence = item.review?.intelligence || {};
+  if (intelligence.leadQuality) {
+    return {
+      level: intelligence.leadQuality,
+      levelClass: leadQualityClass(intelligence.leadQuality),
+      reason: intelligence.leadQualityReason || leadQualityReason(intelligence.leadQuality),
+      signals: intelligence.leadQualitySignals?.length ? intelligence.leadQualitySignals.slice(0, 4) : leadQualitySignalsFromText(item).slice(0, 4)
+    };
+  }
+
+  const text = normalizeForReview(`${item.transcriptText || ""} ${item.review?.summary || ""} ${item.review?.longSummary || ""}`);
+  const signals = leadQualitySignalsFromText(item);
+  const strongSignals = scoreMatches(text, [
+    "terreno",
+    "land",
+    "cash",
+    "efectivo",
+    "financ",
+    "credito",
+    "crédito",
+    "lender",
+    "preapproval",
+    "pre-aprob",
+    "aprobado",
+    "planos",
+    "presupuesto",
+    "budget",
+    "cita",
+    "agendada",
+    "appointment"
+  ]);
+  const weakSignals = scoreMatches(text, [
+    "no tengo terreno",
+    "no tiene terreno",
+    "solo informacion",
+    "solo información",
+    "curioso",
+    "no estoy listo",
+    "no esta listo",
+    "todavia no",
+    "todavía no",
+    "no me interesa",
+    "equivocado",
+    "wrong"
+  ]);
+  const hasMeetingSignal = /cita|agendada|appointment|meeting|visita/.test(text);
+  const level = strongSignals >= 4 || (strongSignals >= 2 && hasMeetingSignal)
+    ? "High"
+    : weakSignals >= 2 || strongSignals === 0
+      ? "Low"
+      : "Medium";
+
+  return {
+    level,
+    levelClass: leadQualityClass(level),
+    reason: leadQualityReason(level),
+    signals: signals.length ? signals.slice(0, 4) : ["Not enough transcript detail to identify stronger buying signals."]
+  };
+}
+
+function leadQualitySignalsFromText(item) {
+  const text = normalizeForReview(`${item.transcriptText || ""} ${item.review?.summary || ""} ${item.review?.longSummary || ""}`);
+  const signals = [];
+  if (/terreno|land|property|acre/.test(text)) signals.push("Mentions land or property.");
+  if (/cash|efectivo|financ|credito|crédito|prestamo|pr[eé]stamo|lender|preapproval|pre-aprob|aprobado/.test(text)) signals.push("Money, lender, or financing came up.");
+  if (/cita|agendada|appointment|meeting|visita|mañana|hoy|semana/.test(text)) signals.push("There is a meeting, timing, or next-step signal.");
+  if (/planos|budget|presupuesto|casa|home|constru/.test(text)) signals.push("The project details are specific enough to review.");
+  if (/solo informacion|solo información|curioso|todavia no|todavía no|no estoy listo|no esta listo|no me interesa/.test(text)) signals.push("Readiness sounds limited or unclear.");
+  return signals;
+}
+
+function leadQualityReason(level) {
+  if (/high/i.test(level)) return "This call has several buying-readiness signals.";
+  if (/low/i.test(level)) return "This call has weak or unclear buying-readiness signals.";
+  return "This call has some useful signals, but not enough to call it high quality yet.";
+}
+
+function leadQualityClass(level) {
+  if (/high/i.test(level)) return "lead-quality-high";
+  if (/low/i.test(level)) return "lead-quality-low";
+  return "lead-quality-medium";
 }
 
 function renderNotesTab(item) {
@@ -1214,16 +1317,8 @@ function renderNotesTab(item) {
         <strong>${escapeHtml(item.review.hasAi ? noteText.longSummary : noteText.noAiSummary)}</strong>
       </div>
       <div class="review-chip">
-        <span>${noteText.objectionsLabel}</span>
-        <strong>${escapeHtml(noteText.objections)}</strong>
-      </div>
-      <div class="review-chip">
-        <span>${noteText.followUpLabel}</span>
-        <strong>${escapeHtml(noteText.followUpNeeded)}</strong>
-      </div>
-      <div class="review-chip action">
-        <span>${noteText.nextActionLabel}</span>
-        <strong>${escapeHtml(noteText.nextAction)}</strong>
+        <span>${noteText.objectiveLabel}</span>
+        <strong>${escapeHtml(getMainObjective(item))}</strong>
       </div>
     </div>
   `;
@@ -1282,15 +1377,11 @@ function getReviewText(review, spanish, spanishNotes = null) {
       guidanceLabel: "AI guidance",
       quickGuidanceLabel: "Quick guidance",
       whatHappenedLabel: "What Happened",
-      objectionsLabel: "Main Objections",
-      followUpLabel: "Follow-Up Needed",
-      nextActionLabel: "Recommended Next Action",
+      objectiveLabel: "Main Objective",
       summary: review.summary,
       longSummary: review.longSummary,
       noAiSummary: "This call has not been summarized by AI yet. Click Analyze New Calls to generate a real summary from the saved transcript.",
-      objections: review.objections.join(", ") || "None found",
-      followUpNeeded: review.intelligence?.followUpNeeded || (review.needsFollowUp ? "Needs action" : "No urgent action"),
-      nextAction: review.nextAction
+      objections: review.objections.join(", ") || "None found"
     };
   }
 
@@ -1299,15 +1390,11 @@ function getReviewText(review, spanish, spanishNotes = null) {
       guidanceLabel: "Guia de IA",
       quickGuidanceLabel: "Guia rapida",
       whatHappenedLabel: "Que paso",
-      objectionsLabel: "Objeciones principales",
-      followUpLabel: "Seguimiento necesario",
-      nextActionLabel: "Siguiente accion recomendada",
+      objectiveLabel: "Objetivo principal",
       summary: spanishNotes.summary,
       longSummary: spanishNotes.longSummary,
       noAiSummary: "Esta llamada todavia no tiene un resumen de IA. Haz clic en Analyze New Calls para generar un resumen real desde la transcripcion guardada.",
-      objections: spanishNotes.objections,
-      followUpNeeded: spanishNotes.followUpNeeded || translateReviewPhrase(review.intelligence?.followUpNeeded || "Unclear"),
-      nextAction: spanishNotes.nextAction
+      objections: spanishNotes.objections
     };
   }
 
@@ -1315,15 +1402,11 @@ function getReviewText(review, spanish, spanishNotes = null) {
     guidanceLabel: "Guia de IA",
     quickGuidanceLabel: "Guia rapida",
     whatHappenedLabel: "Que paso",
-    objectionsLabel: "Objeciones principales",
-    followUpLabel: "Seguimiento necesario",
-    nextActionLabel: "Siguiente accion recomendada",
+    objectiveLabel: "Objetivo principal",
     summary: translateReviewPhrase(review.summary),
     longSummary: translateReviewPhrase(review.longSummary || review.summary),
     noAiSummary: "Esta llamada todavia no tiene un resumen de IA. Haz clic en Analyze New Calls para generar un resumen real desde la transcripcion guardada.",
-    objections: review.objections.length ? review.objections.map(translateReviewPhrase).join(", ") : "No se encontro ninguna",
-    followUpNeeded: translateReviewPhrase(review.intelligence?.followUpNeeded || "Unclear"),
-    nextAction: translateReviewPhrase(review.nextAction)
+    objections: review.objections.length ? review.objections.map(translateReviewPhrase).join(", ") : "No se encontro ninguna"
   };
 }
 
@@ -2083,6 +2166,9 @@ function parseAiIntelligence(value) {
     "summary": "summary",
     "what happened": "whatHappened",
     "follow-up needed": "followUpNeeded",
+    "lead quality": "leadQuality",
+    "lead quality reason": "leadQualityReason",
+    "lead quality signals": "leadQualitySignals",
     "confidence": "confidence"
   };
 
@@ -2091,7 +2177,11 @@ function parseAiIntelligence(value) {
     if (index === -1) continue;
     const rawKey = line.slice(0, index).trim().toLowerCase();
     const key = map[rawKey];
-    if (key) fields[key] = line.slice(index + 1).trim();
+    if (key === "leadQualitySignals") {
+      fields[key] = line.slice(index + 1).split(/;|,/).map((item) => item.trim()).filter(Boolean);
+    } else if (key) {
+      fields[key] = line.slice(index + 1).trim();
+    }
   }
 
   if (!fields.summary) fields.summary = firstLine(value);
