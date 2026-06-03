@@ -20,19 +20,19 @@ const config = {
   ghlApiBase: trimSlash(process.env.GHL_API_BASE || "https://services.leadconnectorhq.com"),
   ghlApiVersion: process.env.GHL_API_VERSION || "2021-07-28",
   ghlLocationId: process.env.GHL_LOCATION_ID || "",
-  ghlToken: process.env.GHL_PRIVATE_INTEGRATION_TOKEN || "",
+  ghlToken: process.env.GHL_API_KEY || process.env.GHL_PRIVATE_INTEGRATION_TOKEN || process.env.GOHIGHLEVEL_API_KEY || "",
   ghlLocations: {
     "south-texas-builders": {
       sourceKey: "south-texas-builders",
       sourceName: "South Texas Builders",
       locationId: process.env.GHL_LOCATION_ID || "",
-      token: process.env.GHL_PRIVATE_INTEGRATION_TOKEN || ""
+      token: process.env.GHL_API_KEY || process.env.GHL_PRIVATE_INTEGRATION_TOKEN || process.env.GOHIGHLEVEL_API_KEY || ""
     },
     cuates: {
       sourceKey: "cuates",
       sourceName: "Cuates Construction",
       locationId: process.env.CUATES_GHL_LOCATION_ID || "",
-      token: process.env.CUATES_GHL_PRIVATE_INTEGRATION_TOKEN || ""
+      token: process.env.CUATES_GHL_API_KEY || process.env.CUATES_GHL_PRIVATE_INTEGRATION_TOKEN || ""
     }
   },
   openAiKey: process.env.OPENAI_API_KEY || "",
@@ -67,6 +67,10 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/status") {
       return sendJson(res, await getStatus());
+    }
+
+    if (url.pathname === "/api/debug/data-counts") {
+      return sendJson(res, await getDataCounts());
     }
 
     if (url.pathname === "/api/sync/latest") {
@@ -231,6 +235,35 @@ async function getStatus() {
         Boolean(account && config.metaTokens[key])
       ]))
     }
+  };
+}
+
+async function getDataCounts() {
+  if (!hasSupabase()) {
+    return {
+      ok: false,
+      message: "Supabase is not configured.",
+      supabaseConfigured: false,
+      centralizedStartDate
+    };
+  }
+
+  const [companies, dailyEntries, meetings] = await Promise.all([
+    supabaseRequest("/rest/v1/companies?select=id,slug,name,active&active=eq.true", { method: "GET" }),
+    supabaseRequest(`/rest/v1/daily_entries?select=id,company_id,entry_date,leads&entry_date=gte.${encodeURIComponent(centralizedStartDate)}&order=entry_date.asc`, { method: "GET" }),
+    supabaseRequest(`/rest/v1/meetings?select=id,company_id,meeting_date,meeting_type,status&meeting_date=gte.${encodeURIComponent(centralizedStartDate)}&order=meeting_date.asc`, { method: "GET" })
+  ]);
+
+  return {
+    ok: true,
+    supabaseConfigured: true,
+    centralizedStartDate,
+    companyCount: Array.isArray(companies) ? companies.length : 0,
+    dailyEntryCount: Array.isArray(dailyEntries) ? dailyEntries.length : 0,
+    meetingCount: Array.isArray(meetings) ? meetings.length : 0,
+    leads: (Array.isArray(dailyEntries) ? dailyEntries : []).reduce((sum, row) => sum + toNumber(row.leads), 0),
+    lenderMeetings: (Array.isArray(meetings) ? meetings : []).filter((row) => cleanText(row.meeting_type).toLowerCase() === "lender").length,
+    constructionMeetings: (Array.isArray(meetings) ? meetings : []).filter((row) => cleanText(row.meeting_type).toLowerCase() === "construction").length
   };
 }
 
