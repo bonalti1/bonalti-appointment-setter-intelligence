@@ -1,0 +1,79 @@
+services:
+  - type: web
+    name: appointment-setter-intelligence
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: HOST
+        value: 0.0.0.0
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GHL_API_BASE
+        value: https://services.leadconnectorhq.com
+      - key: GHL_API_VERSION
+        value: 2021-07-28
+      - key: GHL_LOCATION_ID
+        sync: false
+      - key: GHL_PRIVATE_INTEGRATION_TOKEN
+        sync: false
+      - key: CUATES_GHL_LOCATION_ID
+        sync: false
+      - key: CUATES_GHL_PRIVATE_INTEGRATION_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: SOUTH_TEXAS_META_ACCESS_TOKEN
+        sync: false
+      - key: SOUTH_TEXAS_META_AD_ACCOUNT_ID
+        sync: false
+      - key: CUATES_META_ACCESS_TOKEN
+        sync: false
+      - key: CUATES_META_AD_ACCOUNT_ID
+        sync: false
+      - key: META_API_VERSION
+        value: v25.0
+
+  - type: cron
+    name: appointment-setter-hourly-sync
+    runtime: node
+    plan: starter
+    schedule: "0 * * * *"
+    buildCommand: npm install
+    startCommand: npm run hourly-sync
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GHL_API_BASE
+        value: https://services.leadconnectorhq.com
+      - key: GHL_API_VERSION
+        value: 2021-07-28
+      - key: GHL_LOCATION_ID
+        sync: false
+      - key: GHL_PRIVATE_INTEGRATION_TOKEN
+        sync: false
+      - key: CUATES_GHL_LOCATION_ID
+        sync: false
+      - key: CUATES_GHL_PRIVATE_INTEGRATION_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: HOURLY_SYNC_SOURCES
+        value: south-texas-builders,cuates
+      - key: HOURLY_TRANSCRIPT_LIMIT
+        value: 80
+      - key: HOURLY_ANALYZE_LIMIT
+        value: 8

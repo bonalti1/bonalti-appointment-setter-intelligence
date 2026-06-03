@@ -1,0 +1,12 @@
+{
+  "name": "appointment-setter-intelligence-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs",
+    "sync-transcripts": "node scripts/sync-transcripts.mjs",
+    "hourly-sync": "node scripts/hourly-sync.mjs"
+  }
+}

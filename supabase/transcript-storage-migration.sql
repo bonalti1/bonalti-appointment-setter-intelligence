@@ -1,0 +1,9 @@
+alter table conversation_transcripts add column if not exists conversation_id text;
+alter table conversation_transcripts add column if not exists source_key text;
+alter table conversation_transcripts add column if not exists source_name text;
+alter table conversation_transcripts add column if not exists client_name text;
+alter table conversation_transcripts add column if not exists message_type text;
+alter table conversation_transcripts add column if not exists call_status text;
+alter table conversation_transcripts add column if not exists call_duration_seconds integer;
+alter table conversation_transcripts add column if not exists date_added timestamptz;
+alter table conversation_transcripts add column if not exists transcript_segments jsonb;

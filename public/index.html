@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Appointment Setter Intelligence Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar" aria-label="Companies">
+      <div class="brand">
+        <div class="brand-mark"><img alt="Bonalti" src="/assets/bonalti.png"></div>
+        <small>Setter Intelligence</small>
+      </div>
+      <p class="sidebar-label">Companies</p>
+      <nav class="company-nav" id="companyNav"></nav>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="company-title">
+          <div class="logo-frame hero-logo" id="selectedLogo">ST</div>
+          <div>
+            <p class="eyebrow" id="selectedSubtitle">Google Sheets · GHL · Supabase</p>
+            <h1 id="selectedCompany">Bonalti</h1>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="icon-button" id="refreshBtn" title="Refresh data" aria-label="Refresh data">
+            <span>Refresh</span>
+          </button>
+          <button class="icon-button primary" id="syncSheetsBtn" title="Sync Sheets to Supabase" aria-label="Sync Sheets to Supabase">
+            <span>Sync Sheets</span>
+          </button>
+          <button class="icon-button" id="syncGhlBtn" title="Sync GHL conversations" aria-label="Sync GHL conversations">
+            <span>Sync GHL</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="status-strip" id="statusStrip">
+        <div class="status-item"><span class="dot muted"></span><span>Loading connections</span></div>
+      </section>
+
+      <section class="dashboard-date-filter">
+        <button class="active" data-dashboard-date="this-month">This Month</button>
+        <button data-dashboard-date="last-month">Last Month</button>
+        <button data-dashboard-date="this-year">This Year</button>
+        <button data-dashboard-date="custom">Custom</button>
+        <label class="admin-spend-control">
+          Admin / Spend
+          <input id="adminSpend" type="number" min="0" step="0.01" placeholder="0.00">
+        </label>
+        <div class="custom-date-range" id="dashboardCustomDateRange" hidden>
+          <label class="date-filter">
+            From
+            <input id="dashboardFrom" type="date">
+          </label>
+          <label class="date-filter">
+            To
+            <input id="dashboardTo" type="date">
+          </label>
+          <button data-dashboard-date="clear-custom">Clear dates</button>
+        </div>
+      </section>
+
+      <section class="metric-grid" id="kpis"></section>
+
+      <section class="panel activity-tracker-panel">
+        <div class="meeting-list-head">
+          <div>
+            <p class="eyebrow">GHL Activity</p>
+            <h2>Activity Tracker</h2>
+          </div>
+          <span>Today</span>
+        </div>
+        <div class="call-analysis-tracker" id="callAnalysisTracker"></div>
+      </section>
+
+      <section class="panel meeting-panel">
+        <div class="meeting-list-head">
+          <div>
+            <p class="eyebrow">Construction Meetings</p>
+            <h2>Construction Meeting List</h2>
+          </div>
+          <span id="meetingCount">0 meetings</span>
+        </div>
+        <div class="meeting-list" id="meetingList"></div>
+      </section>
+
+      <section class="panel transcript-panel">
+        <div class="panel-head split">
+          <div>
+            <p class="eyebrow">GHL Conversations</p>
+            <h2>Call Analysis</h2>
+            <p>Messages are counted in the tracker. The review list focuses on saved phone calls only.</p>
+          </div>
+          <div class="actions">
+            <button class="icon-button sync-stamp" id="lastSavedBtn">Last saved: checking</button>
+            <button class="icon-button" id="syncTranscriptsBtn">Sync Latest Leads</button>
+            <button class="icon-button primary" id="loadTranscriptsBtn">Load Saved Reviews</button>
+          </div>
+        </div>
+        <div class="review-mode-tabs" id="reviewModeTabs">
+          <button class="active" data-review-mode="calls">Call Analysis</button>
+          <button data-review-mode="report">Daily Report</button>
+        </div>
+        <div class="transcript-tools" id="transcriptTools" hidden>
+          <button class="active" data-date-preset="today">Today</button>
+          <button data-date-preset="yesterday">Yesterday</button>
+          <button data-date-preset="last-month">Last Month</button>
+          <button data-date-preset="custom">Custom</button>
+          <div class="custom-date-range" id="customDateRange" hidden>
+            <label class="date-filter">
+            From
+            <input id="transcriptFrom" type="date">
+            </label>
+            <label class="date-filter">
+            To
+            <input id="transcriptTo" type="date">
+            </label>
+            <button data-transcript-filter="clear-dates">Clear dates</button>
+          </div>
+        </div>
+        <div class="objection-dashboard" id="objectionDashboard" hidden>
+          <article>
+            <div class="mini-head">
+              <div>
+                <p class="eyebrow">Objections</p>
+                <h3>Objection Intelligence</h3>
+              </div>
+              <button class="mini-toggle" id="toggleObjectionsBtn">Show</button>
+            </div>
+            <div class="mini-list" id="objectionTrends" hidden></div>
+          </article>
+        </div>
+        <div class="ai-review-bar" id="aiReviewBar" hidden>
+          <div>
+            <p class="eyebrow">AI Call Analysis</p>
+            <h3>Analyzes already-saved useful phone calls only.</h3>
+          </div>
+          <button class="icon-button" id="runAiReviewsBtn">Analyze New Calls</button>
+        </div>
+        <div class="transcript-workspace" id="transcriptWorkspace">
+          <div class="call-inbox" id="callInbox">
+            <p class="empty-state">Select a company and load saved reviews when you want to review conversations.</p>
+          </div>
+          <div class="call-detail" id="callDetail">
+            <p class="empty-state">Select a conversation to review the details.</p>
+          </div>
+        </div>
+        <div class="daily-report" id="dailyReport" hidden></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="/app.js?v=meta-spend-1" type="module"></script>
+  </body>
+</html>
