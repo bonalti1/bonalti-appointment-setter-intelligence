@@ -1501,6 +1501,13 @@ input[type="search"] {
   margin-bottom: 12px;
 }
 
+.daily-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .daily-report-head h3 {
   margin: 2px 0 0;
   font-size: 20px;
@@ -1508,6 +1515,13 @@ input[type="search"] {
 }
 
 .daily-report-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lead-quality-breakdown {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
@@ -1604,6 +1618,7 @@ input[type="search"] {
 }
 
 .daily-report-grid > div,
+.lead-quality-breakdown > article,
 .daily-report-section {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1611,11 +1626,13 @@ input[type="search"] {
   padding: 12px;
 }
 
-.daily-report-grid > div {
+.daily-report-grid > div,
+.lead-quality-breakdown > article {
   box-shadow: 0 8px 22px rgba(20, 24, 32, 0.04);
 }
 
 .daily-report-grid span,
+.lead-quality-breakdown span,
 .daily-report-section > span {
   display: block;
   color: var(--muted);
@@ -1624,15 +1641,27 @@ input[type="search"] {
   text-transform: uppercase;
 }
 
-.daily-report-grid strong {
+.daily-report-grid strong,
+.lead-quality-breakdown strong {
   display: block;
   margin-top: 6px;
   font-size: 24px;
   line-height: 1;
 }
 
+.daily-report-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .daily-report-section {
   margin-top: 8px;
+}
+
+.daily-report-two-column .daily-report-section {
+  margin-top: 0;
 }
 
 .daily-report-section p,
@@ -1647,6 +1676,46 @@ input[type="search"] {
   display: grid;
   gap: 7px;
   padding-left: 18px;
+}
+
+.report-call-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.report-call-list article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 10px;
+}
+
+.report-call-list article > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.report-call-list strong,
+.report-call-list span {
+  display: block;
+}
+
+.report-call-list strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.report-call-list span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.report-call-list p {
+  margin: 8px 0 0;
 }
 
 .transcript-line {
@@ -2107,6 +2176,8 @@ body.monochrome .meeting-row.closed .meeting-meta b {
   .review-grid,
   .summary-grid,
   .daily-report-grid,
+  .lead-quality-breakdown,
+  .daily-report-two-column,
   .executive-summary-grid {
     grid-template-columns: 1fr;
   }

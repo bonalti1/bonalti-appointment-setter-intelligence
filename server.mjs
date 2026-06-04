@@ -1238,11 +1238,11 @@ async function generateDailyExecutiveSummary(input) {
         {
           role: "system",
           content: [
-            "Escribe un reporte diario muy corto para el lider de appointment setting.",
-            "Escribe todo en espanol claro, simple, a nivel de octavo grado.",
-            "Usa solo las metricas provistas.",
+            "Write a short daily operating report for an appointment-setting leader.",
+            "Write in clear, simple English.",
+            "Use only the provided metrics.",
             "Do not invent clients, outcomes, counts, objections, intent, or performance claims.",
-            "No menciones leads del dia si no viene en las metricas.",
+            "Do not mention leads for the period if leads are not provided in the metrics.",
             "Focus on the report period as a daily operating update, not a monthly dashboard.",
             "Keep it extremely short: one paragraph and at most three short bullet points.",
             "Avoid coaching language and avoid rating individual appointment setters."
@@ -1264,7 +1264,7 @@ async function generateDailyExecutiveSummary(input) {
               summary: cleanText(item.summary || ""),
               message: cleanText(item.body || "").slice(0, 700),
               objections: Array.isArray(item.objections) ? item.objections.map(cleanText).slice(0, 4) : [],
-              needs_follow_up: Boolean(item.needsFollowUp)
+              lead_quality: cleanText(item.leadQuality || "")
             }))
           })
         }
@@ -1279,11 +1279,11 @@ async function generateDailyExecutiveSummary(input) {
             additionalProperties: false,
             required: ["executive_summary", "operational_readout", "risk_signals", "priority_actions", "leader_note"],
             properties: {
-              executive_summary: { type: "string", description: "Un parrafo de maximo 45 palabras en espanol simple." },
-              operational_readout: { type: "array", maxItems: 2, items: { type: "string" }, description: "Maximo dos puntos claros sobre los numeros del periodo." },
-              risk_signals: { type: "array", maxItems: 1, items: { type: "string" }, description: "Maximo un riesgo simple si hay evidencia." },
-              priority_actions: { type: "array", maxItems: 1, items: { type: "string" }, description: "Maximo una accion recomendada." },
-              leader_note: { type: "string", description: "Una frase final corta." }
+              executive_summary: { type: "string", description: "One paragraph, max 55 words, in plain English." },
+              operational_readout: { type: "array", maxItems: 2, items: { type: "string" }, description: "At most two clear points about period numbers." },
+              risk_signals: { type: "array", maxItems: 1, items: { type: "string" }, description: "At most one risk if there is evidence." },
+              priority_actions: { type: "array", maxItems: 1, items: { type: "string" }, description: "At most one priority focus." },
+              leader_note: { type: "string", description: "One short closing sentence." }
             }
           }
         }

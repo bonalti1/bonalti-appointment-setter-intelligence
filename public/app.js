@@ -1839,7 +1839,6 @@ function renderDailyReport(items) {
   if (!els.dailyReport) return;
 
   const calls = items.filter((item) => item.kind === "call");
-  const followUps = items.filter((item) => item.review?.needsFollowUp);
   const objections = buildDailyObjectionCounts(items);
   const sheetMetrics = getDailySheetMetricsForReport();
   const summaryKey = dailySummaryKey(items);
@@ -1854,77 +1853,113 @@ function renderDailyReport(items) {
   const totalMessages = inboundMessages + outboundMessages;
   const totalCalls = inboundCalls + outboundCalls;
   const totalActivity = totalMessages + totalCalls;
+  const analyzedCalls = calls.filter((item) => item.review?.hasAi).length;
+  const leadQuality = buildLeadQualityCounts(calls);
+  const lenderMeetings = sheetMetrics.lender || 0;
+  const constructionMeetings = sheetMetrics.meetingsBooked || 0;
+  const totalMeetings = lenderMeetings + constructionMeetings;
+  const spend = Number(sheetMetrics.adSpend || 0);
+  const bestCalls = calls
+    .filter((item) => item.review?.hasAi || item.review?.qualityScore >= 82)
+    .sort((a, b) => (b.review?.qualityScore || 0) - (a.review?.qualityScore || 0))
+    .slice(0, 3);
+  const problemCalls = calls
+    .filter((item) => (item.review?.qualityScore || 0) < 70 || /low/i.test(getLeadQuality(item).level))
+    .sort((a, b) => (a.review?.qualityScore || 0) - (b.review?.qualityScore || 0))
+    .slice(0, 3);
   const shortSummary = executive?.executive_summary || buildSimpleDailyReportSummary({
     totalActivity,
     inboundMessages,
     outboundMessages,
     inboundCalls,
     outboundCalls,
-    meetings: sheetMetrics.meetingsBooked,
-    closedDeals: sheetMetrics.closedDeals,
-    followUps: followUps.length,
-    topObjection: objections[0]?.label || ""
+    leads: sheetMetrics.leads,
+    analyzedCalls,
+    lenderMeetings,
+    constructionMeetings,
+    spend,
+    topQuality: topLeadQualityLabel(leadQuality)
   });
   els.dailyReport.hidden = false;
   els.dailyReport.innerHTML = `
     <div class="daily-report-head">
       <div>
-        <p class="eyebrow">Resumen diario</p>
+        <p class="eyebrow">Daily Report</p>
         <h3>${escapeHtml(getSelectedCompany().name)} · ${escapeHtml(summaryDateLabel())}</h3>
       </div>
-      <button class="icon-button" type="button" onclick="window.print()">Imprimir</button>
+      <div class="daily-report-actions">
+        <button class="icon-button" id="syncDailyReportBtn">Sync Latest Before Report</button>
+        <button class="icon-button" type="button" onclick="window.print()">Print</button>
+      </div>
     </div>
     <div class="executive-summary-card">
       <div class="executive-ai-head">
         <div>
-          <span>Resumen con inteligencia artificial</span>
-          <small>${trackerLoading ? "Cargando datos de hoy" : loading ? "Analizando actividad del dia" : executive ? "Reporte listo para revisar" : "Resumen rapido listo"}</small>
+          <span>Operating readout</span>
+          <small>${trackerLoading ? "Loading activity" : loading ? "Generating AI readout" : executive ? "AI readout ready" : "Supabase summary ready"}</small>
         </div>
-        <b>AI</b>
+        <b>${executive ? "AI" : "DATA"}</b>
       </div>
       <div class="executive-ai-body">
-        <strong>${escapeHtml(trackerLoading ? "Cargando llamadas y mensajes de hoy..." : loading ? "Generando resumen simple del dia..." : shortSummary)}</strong>
+        <strong>${escapeHtml(trackerLoading ? "Loading calls and messages..." : loading ? "Generating report summary..." : shortSummary)}</strong>
       </div>
-      ${!executive ? `<button class="icon-button primary" id="generateDailySummaryBtn" ${loading || trackerLoading ? "disabled" : ""}>${trackerLoading ? "Cargando..." : loading ? "Generando..." : "Mejorar con IA"}</button>` : ""}
+      ${executive ? renderExecutiveSummaryDetails(executive) : ""}
+      ${!executive ? `<button class="icon-button primary" id="generateDailySummaryBtn" ${loading || trackerLoading ? "disabled" : ""}>${trackerLoading ? "Loading..." : loading ? "Generating..." : "Generate AI Report"}</button>` : ""}
     </div>
     <div class="daily-report-grid">
-      <div><span>Actividad total</span><strong>${fmt(totalActivity)}</strong></div>
-      <div><span>Llamadas inbound</span><strong>${fmt(inboundCalls)}</strong></div>
-      <div><span>Llamadas outbound</span><strong>${fmt(outboundCalls)}</strong></div>
-      <div><span>Mensajes inbound</span><strong>${fmt(inboundMessages)}</strong></div>
-      <div><span>Mensajes outbound</span><strong>${fmt(outboundMessages)}</strong></div>
-      <div><span>Juntas agendadas</span><strong>${fmt(sheetMetrics.meetingsBooked)}</strong></div>
-      <div><span>Seguimientos</span><strong>${fmt(followUps.length)}</strong></div>
-      <div><span>Cerrados</span><strong>${fmt(sheetMetrics.closedDeals)}</strong></div>
+      <div><span>Total Leads</span><strong>${fmt(sheetMetrics.leads)}</strong></div>
+      <div><span>Incoming Calls</span><strong>${fmt(inboundCalls)}</strong></div>
+      <div><span>Outgoing Calls</span><strong>${fmt(outboundCalls)}</strong></div>
+      <div><span>Connected Calls Analyzed</span><strong>${fmt(analyzedCalls)}</strong></div>
+      <div><span>Lender Meetings</span><strong>${fmt(lenderMeetings)}</strong></div>
+      <div><span>Construction Meetings</span><strong>${fmt(constructionMeetings)}</strong></div>
+      <div><span>Ad Spend</span><strong>${money(spend)}</strong></div>
+      <div><span>Cost Per Meeting</span><strong>${money(safeCost(spend, totalMeetings))}</strong></div>
+      <div><span>Incoming Messages</span><strong>${fmt(inboundMessages)}</strong></div>
+      <div><span>Outgoing Messages</span><strong>${fmt(outboundMessages)}</strong></div>
+      <div><span>Total Activity</span><strong>${fmt(totalActivity)}</strong></div>
+      <div><span>Closed Deals</span><strong>${fmt(sheetMetrics.closedDeals)}</strong></div>
+    </div>
+    <div class="lead-quality-breakdown">
+      <article class="lead-quality-high"><span>High Quality</span><strong>${fmt(leadQuality.High)}</strong></article>
+      <article class="lead-quality-medium"><span>Medium Quality</span><strong>${fmt(leadQuality.Medium)}</strong></article>
+      <article class="lead-quality-low"><span>Low Quality</span><strong>${fmt(leadQuality.Low)}</strong></article>
+      <article><span>Unclear</span><strong>${fmt(leadQuality.Unclear)}</strong></article>
+    </div>
+    <div class="daily-report-two-column">
+      <section class="daily-report-section">
+        <span>Best call outcomes</span>
+        ${renderReportCallRows(bestCalls, "No strong analyzed calls found for this period yet.")}
+      </section>
+      <section class="daily-report-section">
+        <span>Weak or problem calls</span>
+        ${renderReportCallRows(problemCalls, "No weak call pattern found in the loaded calls.")}
+      </section>
     </div>
     <div class="daily-report-section">
-      <span>Objecion principal</span>
-      <p>${objections.length ? objections.map((row) => `${translateReviewPhrase(row.label)} (${row.count})`).join(", ") : "No se detectaron objeciones fuertes en la actividad cargada."}</p>
-    </div>
-    <div class="daily-report-section">
-      <span>Siguiente accion</span>
-      <p>${followUps.length ? `Revisar ${fmt(followUps.length)} seguimiento${followUps.length === 1 ? "" : "s"} pendiente${followUps.length === 1 ? "" : "s"}.` : "No se detectaron seguimientos urgentes en las llamadas cargadas."}</p>
+      <span>Common call blockers</span>
+      <p>${objections.length ? objections.map((row) => `${escapeHtml(row.label)} (${fmt(row.count)})`).join(", ") : "No strong blockers were detected in the loaded call analysis."}</p>
     </div>
   `;
 
+  els.dailyReport.querySelector("#syncDailyReportBtn")?.addEventListener("click", () => syncTranscripts());
   els.dailyReport.querySelector("#generateDailySummaryBtn")?.addEventListener("click", () => generateDailySummary(items));
 }
 
-function buildSimpleDailyReportSummary({ totalActivity, inboundMessages, outboundMessages, inboundCalls, outboundCalls, meetings, closedDeals, followUps, topObjection }) {
-  const objectionText = topObjection ? ` La objecion principal fue ${translateReviewPhrase(topObjection).toLowerCase()}.` : "";
-  return `Hoy se registraron ${fmt(totalActivity)} actividades: ${fmt(inboundCalls)} llamadas inbound, ${fmt(outboundCalls)} llamadas outbound, ${fmt(inboundMessages)} mensajes inbound y ${fmt(outboundMessages)} mensajes outbound. Se agendaron ${fmt(meetings)} juntas y se cerraron ${fmt(closedDeals)} clientes. Hay ${fmt(followUps)} seguimiento${followUps === 1 ? "" : "s"} pendiente${followUps === 1 ? "" : "s"}.${objectionText}`;
+function buildSimpleDailyReportSummary({ totalActivity, inboundMessages, outboundMessages, inboundCalls, outboundCalls, leads, analyzedCalls, lenderMeetings, constructionMeetings, spend, topQuality }) {
+  return `${fmt(leads)} leads, ${fmt(inboundCalls)} incoming calls, ${fmt(outboundCalls)} outgoing calls, ${fmt(inboundMessages)} incoming messages, and ${fmt(outboundMessages)} outgoing messages are loaded for this period. ${fmt(analyzedCalls)} connected calls have AI analysis. Meetings: ${fmt(lenderMeetings)} lender and ${fmt(constructionMeetings)} construction. Spend is ${money(spend)}. Lead quality currently trends ${topQuality}.`;
 }
 
 function renderExecutiveSummaryDetails(summary) {
   return `
     <div class="executive-summary-grid">
-      ${renderExecutiveList("Que paso hoy", summary.operational_readout)}
-      ${renderExecutiveList("Riesgos", summary.risk_signals)}
-      ${renderExecutiveList("Que hacer despues", summary.priority_actions)}
+      ${renderExecutiveList("What happened", summary.operational_readout)}
+      ${renderExecutiveList("Risk signals", summary.risk_signals)}
+      ${renderExecutiveList("Priority focus", summary.priority_actions)}
     </div>
     <div class="executive-leader-note">
-      <span>Nota para el lider</span>
-      <p>${escapeHtml(summary.leader_note || "No hay nota adicional.")}</p>
+      <span>Leader note</span>
+      <p>${escapeHtml(summary.leader_note || "No additional note.")}</p>
     </div>
   `;
 }
@@ -1934,9 +1969,47 @@ function renderExecutiveList(label, rows) {
   return `
     <section>
       <span>${escapeHtml(label)}</span>
-      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>No hay una senal clara en la actividad cargada.</p>`}
+      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>No clear signal in the loaded activity.</p>`}
     </section>
   `;
+}
+
+function renderReportCallRows(rows, emptyText) {
+  if (!rows.length) return `<p>${escapeHtml(emptyText)}</p>`;
+  return `
+    <div class="report-call-list">
+      ${rows.map((item) => {
+        const quality = getLeadQuality(item);
+        return `
+          <article>
+            <div>
+              <strong>${escapeHtml(item.clientName)}</strong>
+              <span>${escapeHtml(callDirectionLabel(item))} · ${escapeHtml(quality.level)} quality</span>
+            </div>
+            <p>${escapeHtml(item.review?.summary || activityPreview(item))}</p>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function buildLeadQualityCounts(calls) {
+  const counts = { High: 0, Medium: 0, Low: 0, Unclear: 0 };
+  for (const call of calls) {
+    const level = getLeadQuality(call).level;
+    if (/high/i.test(level)) counts.High += 1;
+    else if (/medium/i.test(level)) counts.Medium += 1;
+    else if (/low/i.test(level)) counts.Low += 1;
+    else counts.Unclear += 1;
+  }
+  return counts;
+}
+
+function topLeadQualityLabel(counts) {
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const [label, count] = sorted[0] || ["Unclear", 0];
+  return count ? label : "unclear";
 }
 
 function getDailySheetMetricsForReport() {
@@ -1981,11 +2054,15 @@ async function generateDailySummary(items) {
 
   try {
     const calls = items.filter((item) => item.kind === "call");
-    const followUps = items.filter((item) => item.review?.needsFollowUp);
     const topObjections = buildDailyObjectionCounts(items);
     const sheetMetrics = getDailySheetMetricsForReport();
     const stats = state.activityTracker.stats || buildActivityDirectionStats([]);
     const messages = new Array((stats.inboundMessages || 0) + (stats.outboundMessages || 0)).fill(null);
+    const leadQuality = buildLeadQualityCounts(calls);
+    const lenderMeetings = sheetMetrics.lender || 0;
+    const constructionMeetings = sheetMetrics.meetingsBooked || 0;
+    const totalMeetings = lenderMeetings + constructionMeetings;
+    const spend = Number(sheetMetrics.adSpend || 0);
     const response = await fetch("/api/daily-summary", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2009,7 +2086,16 @@ async function generateDailySummary(items) {
           outbound_messages: stats.outboundMessages || 0,
           calls: (stats.inboundCalls || 0) + (stats.outboundCalls || 0),
           messages: messages.length,
-          follow_ups: followUps.length
+          connected_calls_analyzed: calls.filter((item) => item.review?.hasAi).length,
+          lender_meetings: lenderMeetings,
+          construction_meetings: constructionMeetings,
+          total_meetings: totalMeetings,
+          ad_spend: spend,
+          cost_per_meeting: safeCost(spend, totalMeetings),
+          lead_quality_high: leadQuality.High,
+          lead_quality_medium: leadQuality.Medium,
+          lead_quality_low: leadQuality.Low,
+          lead_quality_unclear: leadQuality.Unclear
         },
         topObjections,
         activity: items.slice(0, 80).map((item) => ({
@@ -2022,7 +2108,7 @@ async function generateDailySummary(items) {
           body: item.body,
           summary: activityPreview(item),
           objections: item.review?.objections || [],
-          needsFollowUp: Boolean(item.review?.needsFollowUp)
+          leadQuality: item.kind === "call" ? getLeadQuality(item).level : ""
         }))
       })
     });
