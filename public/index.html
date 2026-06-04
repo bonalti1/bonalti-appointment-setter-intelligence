@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Appointment Setter Intelligence Dashboard</title>
-    <link rel="stylesheet" href="/styles.css?v=daily-report-1">
+    <link rel="stylesheet" href="/styles.css?v=daily-report-2">
   </head>
   <body>
     <aside class="sidebar" aria-label="Companies">
@@ -106,9 +106,11 @@
           <button data-review-mode="report">Daily Report</button>
         </div>
         <div class="transcript-tools" id="transcriptTools" hidden>
-          <button class="active" data-date-preset="today">Today</button>
+          <button class="active" data-date-preset="today" data-date-context="calls">Today</button>
           <button data-date-preset="this-month">This Month</button>
           <button data-date-preset="last-month">Last Month</button>
+          <button data-date-preset="this-year" data-date-context="report">This Year</button>
+          <button data-date-preset="last-year" data-date-context="report">Last Year</button>
           <button data-date-preset="custom">Custom</button>
           <div class="custom-date-range" id="customDateRange" hidden>
             <label class="date-filter">
@@ -155,6 +157,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=daily-report-1" type="module"></script>
+    <script src="/app.js?v=daily-report-2" type="module"></script>
   </body>
 </html>

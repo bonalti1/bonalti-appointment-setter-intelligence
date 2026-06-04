@@ -127,6 +127,13 @@ els.reviewModeTabs.addEventListener("click", (event) => {
   state.transcriptFilter = "all";
   state.transcriptSearch = "";
   state.transcriptDetailTab = "summary";
+  if (state.reviewMode === "report" && state.datePreset === "today") {
+    applyDatePreset("this-month", { reload: false });
+  } else if (state.reviewMode === "calls" && ["this-year", "last-year"].includes(state.datePreset)) {
+    applyDatePreset("today", { reload: false });
+  } else {
+    renderDatePresetControls();
+  }
   renderTranscriptWorkspace();
   if (state.reviewMode === "report") {
     loadActivityTracker().then(() => renderTranscriptWorkspace());
@@ -313,6 +320,8 @@ function dashboardDateRangeForPreset(preset) {
 
 function renderDatePresetControls() {
   for (const button of els.transcriptTools.querySelectorAll("[data-date-preset]")) {
+    const context = button.dataset.dateContext || "all";
+    button.hidden = context !== "all" && context !== state.reviewMode;
     button.classList.toggle("active", button.dataset.datePreset === state.datePreset);
   }
 
@@ -329,6 +338,17 @@ function dateRangeForPreset(preset) {
   if (preset === "last-month") {
     const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const last = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { from: dateInputValue(first), to: dateInputValue(last) };
+  }
+
+  if (preset === "this-year") {
+    const first = new Date(today.getFullYear(), 0, 1);
+    return { from: dateInputValue(first), to: dateInputValue(today) };
+  }
+
+  if (preset === "last-year") {
+    const first = new Date(today.getFullYear() - 1, 0, 1);
+    const last = new Date(today.getFullYear() - 1, 11, 31);
     return { from: dateInputValue(first), to: dateInputValue(last) };
   }
 
