@@ -129,7 +129,7 @@ els.reviewModeTabs.addEventListener("click", (event) => {
   state.transcriptDetailTab = "summary";
   if (state.reviewMode === "report" && state.datePreset === "today") {
     applyDatePreset("this-month", { reload: false });
-  } else if (state.reviewMode === "calls" && ["this-year", "last-year"].includes(state.datePreset)) {
+  } else if (state.reviewMode === "calls" && ["daily", "weekly", "this-year"].includes(state.datePreset)) {
     applyDatePreset("today", { reload: false });
   } else {
     renderDatePresetControls();
@@ -330,6 +330,15 @@ function renderDatePresetControls() {
 
 function dateRangeForPreset(preset) {
   const today = new Date();
+  if (preset === "daily") {
+    return { from: dateInputValue(today), to: dateInputValue(today) };
+  }
+
+  if (preset === "weekly") {
+    const first = addDays(today, -today.getDay());
+    return { from: dateInputValue(first), to: dateInputValue(today) };
+  }
+
   if (preset === "this-month") {
     const first = new Date(today.getFullYear(), today.getMonth(), 1);
     return { from: dateInputValue(first), to: dateInputValue(today) };
@@ -344,12 +353,6 @@ function dateRangeForPreset(preset) {
   if (preset === "this-year") {
     const first = new Date(today.getFullYear(), 0, 1);
     return { from: dateInputValue(first), to: dateInputValue(today) };
-  }
-
-  if (preset === "last-year") {
-    const first = new Date(today.getFullYear() - 1, 0, 1);
-    const last = new Date(today.getFullYear() - 1, 11, 31);
-    return { from: dateInputValue(first), to: dateInputValue(last) };
   }
 
   return { from: dateInputValue(today), to: dateInputValue(today) };
