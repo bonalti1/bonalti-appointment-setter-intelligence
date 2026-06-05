@@ -1096,6 +1096,7 @@ function emptySpeedToCallStats() {
 }
 
 function formatMinutes(value) {
+  if (value === null || value === undefined || value === "") return "--";
   if (!Number.isFinite(Number(value))) return "--";
   const minutes = Number(value);
   if (minutes < 60) return `${minutes % 1 ? minutes.toFixed(1) : Math.round(minutes)}m`;

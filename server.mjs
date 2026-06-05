@@ -1739,8 +1739,14 @@ async function fetchDailyActivity(sourceKey, { from = "", to = "", limit = 150 }
   }
 
   const rows = [];
+  const errors = [];
   for (const target of targets) {
-    rows.push(...await fetchLocationActivity(target, { from, to, limit: Math.ceil(limit / targets.length) }));
+    try {
+      rows.push(...await fetchLocationActivity(target, { from, to, limit: Math.ceil(limit / targets.length) }));
+    } catch (error) {
+      if (sourceKey !== "all") throw error;
+      errors.push(`${target.sourceName || target.sourceKey}: ${error.message}`);
+    }
   }
 
   const activity = rows
@@ -1750,7 +1756,10 @@ async function fetchDailyActivity(sourceKey, { from = "", to = "", limit = 150 }
 
   return {
     ok: true,
-    message: `Loaded ${activity.length} GHL activit${activity.length === 1 ? "y" : "ies"}.`,
+    message: errors.length
+      ? `Loaded ${activity.length} GHL activit${activity.length === 1 ? "y" : "ies"}; ${errors.length} connection${errors.length === 1 ? "" : "s"} failed.`
+      : `Loaded ${activity.length} GHL activit${activity.length === 1 ? "y" : "ies"}.`,
+    warnings: errors,
     activity
   };
 }
