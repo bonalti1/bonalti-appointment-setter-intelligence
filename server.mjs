@@ -126,6 +126,11 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, await backfillCallDirections(sourceKey, limit));
     }
 
+    if (url.pathname === "/api/sync/lead-response" && req.method === "POST") {
+      const sourceKey = url.searchParams.get("sourceKey") || "all";
+      return sendJson(res, await syncLeadCallResponseMetrics(sourceKey));
+    }
+
     if (url.pathname === "/api/ai/reviews" && req.method === "POST") {
       const sourceKey = url.searchParams.get("sourceKey") || "all";
       const limit = Math.min(25, Math.max(1, Number(url.searchParams.get("limit") || 8)));
@@ -1490,6 +1495,11 @@ export async function syncTranscriptsToSupabase(sourceKey, limit) {
     }
 
     await saveTranscriptsToSupabase(transcripts);
+    const responseMetrics = await syncLeadCallResponseMetrics(sourceKey).catch((error) => ({
+      ok: false,
+      recordsProcessed: 0,
+      message: error.message
+    }));
     await recordSyncRun({
       syncType: `transcripts:${sourceKey}`,
       status: "success",
@@ -1500,7 +1510,8 @@ export async function syncTranscriptsToSupabase(sourceKey, limit) {
     return {
       ok: true,
       message: `Synced ${transcripts.length} transcript${transcripts.length === 1 ? "" : "s"} to Supabase.`,
-      recordsProcessed: transcripts.length
+      recordsProcessed: transcripts.length,
+      leadResponseMetrics: responseMetrics
     };
   } catch (error) {
     await recordSyncRun({
@@ -1884,6 +1895,43 @@ function emptySpeedToCallStats() {
 async function fetchSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
   if (!hasSupabase()) return emptySpeedToCallStats();
 
+  const storedStats = await fetchStoredSpeedToCallStats(sourceKey, { from, to }).catch(() => null);
+  if (storedStats) return storedStats;
+
+  return fetchLiveSpeedToCallStats(sourceKey, { from, to });
+}
+
+async function fetchStoredSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
+  const sourceKeys = sourceKey === "all"
+    ? Object.keys(config.ghlLocations)
+    : [sourceKey];
+  const params = new URLSearchParams({
+    select: "source_key,source_name,company_id,meeting_id,ghl_contact_id,pending_call_at,first_outbound_call_at,first_outbound_message_id,minutes_to_first_call,status,pending_stage,updated_at",
+    order: "pending_call_at.desc",
+    limit: "500"
+  });
+  if (sourceKeys.length === 1) {
+    params.set("source_key", `eq.${sourceKeys[0]}`);
+  } else {
+    params.set("source_key", `in.(${sourceKeys.join(",")})`);
+  }
+  if (from) params.set("pending_call_at", `gte.${from}T00:00:00`);
+  if (to) params.append("pending_call_at", `lte.${to}T23:59:59`);
+
+  const rows = await supabaseRequest(`/rest/v1/lead_call_response_metrics?${params.toString()}`, { method: "GET" });
+  if (!Array.isArray(rows)) return null;
+  return summarizeSpeedToCallRows(rows.map((row) => ({
+    meetingId: row.meeting_id || "",
+    contactId: row.ghl_contact_id || "",
+    pendingCallAt: row.pending_call_at || "",
+    firstCallAt: row.first_outbound_call_at || "",
+    minutes: row.minutes_to_first_call === null || row.minutes_to_first_call === undefined ? null : Number(row.minutes_to_first_call),
+    waitingMinutes: row.first_outbound_call_at ? null : Math.max(0, minutesBetween(row.pending_call_at, new Date().toISOString())),
+    stage: cleanText(row.pending_stage || "Pendiente llamada")
+  })), "supabase-lead-call-response-metrics");
+}
+
+async function fetchLiveSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
   const companyRows = await supabaseRequest("/rest/v1/companies?select=id,slug,name,active&active=eq.true", { method: "GET" });
   const companies = (Array.isArray(companyRows) ? companyRows : [])
     .map((company) => ({ id: company.id, ...normalizeCentralCompany(company) }))
@@ -1935,6 +1983,11 @@ async function fetchSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
       stage: cleanText(snapshot.pipeline_stage_name || snapshot.pipeline_stage || snapshot.meeting_status || "Pendiente llamada")
     };
   });
+  return summarizeSpeedToCallRows(rows, "ghl-stage-change-snapshot");
+}
+
+function summarizeSpeedToCallRows(rows, basis) {
+  if (!rows.length) return { ...emptySpeedToCallStats(), basis };
   const calledRows = rows.filter((row) => Number.isFinite(row.minutes));
   const minutes = calledRows.map((row) => row.minutes).sort((a, b) => a - b);
 
@@ -1950,8 +2003,126 @@ async function fetchSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
     rows: rows
       .sort((a, b) => (b.waitingMinutes || b.minutes || 0) - (a.waitingMinutes || a.minutes || 0))
       .slice(0, 8),
-    basis: "ghl-stage-change-snapshot"
+    basis
   };
+}
+
+async function syncLeadCallResponseMetrics(sourceKey = "all") {
+  if (!hasSupabase()) {
+    return { ok: false, message: "Supabase is not configured yet.", recordsProcessed: 0 };
+  }
+
+  const companyRows = await supabaseRequest("/rest/v1/companies?select=id,slug,name,active&active=eq.true", { method: "GET" });
+  const companies = (Array.isArray(companyRows) ? companyRows : [])
+    .map((company) => ({ id: company.id, ...normalizeCentralCompany(company) }))
+    .filter((company) => sourceKey === "all" || company.sourceKey === sourceKey);
+  const companyIds = companies.map((company) => company.id).filter(Boolean);
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const sourceKeys = sourceKey === "all" ? Object.keys(config.ghlLocations) : [sourceKey];
+  if (!companyIds.length) return { ok: true, message: "No matching companies found.", recordsProcessed: 0 };
+
+  const snapshots = await fetchSupabaseRowsByField(
+    "ghl_lead_snapshots",
+    "id,meeting_id,company_id,ghl_contact_id,ghl_opportunity_id,pipeline_stage,pipeline_stage_name,meeting_status,last_activity_at,last_note,synced_at,updated_at,raw_payload",
+    "company_id",
+    companyIds,
+    "&order=updated_at.desc"
+  );
+  const pendingRows = snapshots
+    .filter(isPendingCallSnapshot)
+    .map((snapshot) => {
+      const company = companyById.get(snapshot.company_id) || {};
+      return {
+        sourceKey: company.sourceKey || "",
+        sourceName: company.sourceName || sourceNameForKey(company.sourceKey || ""),
+        companyId: snapshot.company_id || null,
+        meetingId: snapshot.meeting_id || null,
+        contactId: snapshot.ghl_contact_id || "",
+        opportunityId: snapshot.ghl_opportunity_id || "",
+        pendingCallAt: getPendingCallAtFromSnapshot(snapshot),
+        pendingStage: cleanText(snapshot.pipeline_stage_name || snapshot.pipeline_stage || snapshot.meeting_status || "Pendiente llamada")
+      };
+    })
+    .filter((row) => row.sourceKey && row.contactId && row.pendingCallAt);
+
+  const waitingRows = await fetchWaitingLeadResponseRows(sourceKeys).catch(() => []);
+  const metricSeeds = dedupeByValue([
+    ...pendingRows,
+    ...waitingRows.map((row) => ({
+      sourceKey: row.source_key || "",
+      sourceName: row.source_name || sourceNameForKey(row.source_key || ""),
+      companyId: row.company_id || null,
+      meetingId: row.meeting_id || null,
+      contactId: row.ghl_contact_id || "",
+      opportunityId: row.ghl_opportunity_id || "",
+      pendingCallAt: row.pending_call_at || "",
+      pendingStage: cleanText(row.pending_stage || "Pendiente llamada")
+    }))
+  ], (row) => `${row.sourceKey}:${row.contactId}:${row.pendingCallAt}`);
+
+  if (!metricSeeds.length) {
+    return { ok: true, message: "No pending-call leads found to track yet.", recordsProcessed: 0 };
+  }
+
+  const contactIds = [...new Set(metricSeeds.map((row) => row.contactId).filter(Boolean))];
+  const messages = await fetchSupabaseRowsByField(
+    "ghl_messages",
+    "id,contact_id,direction,message_type,call_status,call_duration_seconds,date_added,raw",
+    "contact_id",
+    contactIds,
+    "&order=date_added.asc"
+  );
+  const callsByContact = groupOutboundCallsByContact(messages);
+  const now = new Date().toISOString();
+  const payload = metricSeeds.map((row) => {
+    const pendingAt = new Date(row.pendingCallAt);
+    const firstCall = (callsByContact.get(row.contactId) || [])
+      .find((message) => new Date(message.date_added || 0) >= pendingAt);
+    const minutes = firstCall ? minutesBetween(row.pendingCallAt, firstCall.date_added) : null;
+    return {
+      source_key: row.sourceKey,
+      source_name: row.sourceName || sourceNameForKey(row.sourceKey),
+      company_id: row.companyId,
+      meeting_id: row.meetingId,
+      ghl_contact_id: row.contactId,
+      ghl_opportunity_id: row.opportunityId || null,
+      pending_call_at: row.pendingCallAt,
+      first_outbound_call_at: firstCall?.date_added || null,
+      first_outbound_message_id: firstCall?.id || null,
+      minutes_to_first_call: minutes,
+      status: firstCall ? "called" : "waiting",
+      pending_stage: row.pendingStage || "Pendiente llamada",
+      computed_from: "ghl_lead_snapshots+ghl_messages",
+      updated_at: now
+    };
+  });
+
+  await supabaseRequest("/rest/v1/lead_call_response_metrics?on_conflict=source_key,ghl_contact_id,pending_call_at", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify(payload)
+  });
+
+  return {
+    ok: true,
+    message: `Synced ${payload.length} lead response metric${payload.length === 1 ? "" : "s"} to Supabase.`,
+    recordsProcessed: payload.length
+  };
+}
+
+async function fetchWaitingLeadResponseRows(sourceKeys) {
+  const params = new URLSearchParams({
+    select: "source_key,source_name,company_id,meeting_id,ghl_contact_id,ghl_opportunity_id,pending_call_at,pending_stage",
+    status: "eq.waiting",
+    limit: "500"
+  });
+  if (sourceKeys.length === 1) {
+    params.set("source_key", `eq.${sourceKeys[0]}`);
+  } else {
+    params.set("source_key", `in.(${sourceKeys.join(",")})`);
+  }
+  const rows = await supabaseRequest(`/rest/v1/lead_call_response_metrics?${params.toString()}`, { method: "GET" });
+  return Array.isArray(rows) ? rows : [];
 }
 
 function isPendingCallSnapshot(snapshot) {
@@ -2455,6 +2626,10 @@ function sortTranscriptsNewestFirst(transcripts) {
 
 function dedupeBy(rows, key) {
   return [...new Map(rows.filter((row) => row[key]).map((row) => [row[key], row])).values()];
+}
+
+function dedupeByValue(rows, getKey) {
+  return [...new Map(rows.filter((row) => getKey(row)).map((row) => [getKey(row), row])).values()];
 }
 
 function groupMetrics(rows, getKey) {
