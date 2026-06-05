@@ -369,8 +369,10 @@ async function fetchCentralizedDashboardData(startDate) {
       });
     }
 
+    const meetingRows = Array.isArray(meetings) ? meetings : [];
+    const relatedMeetings = await fetchMeetingRelatedData(meetingRows.map((meeting) => meeting.id).filter(Boolean));
     const clients = [];
-    for (const meeting of Array.isArray(meetings) ? meetings : []) {
+    for (const meeting of meetingRows) {
       const company = companiesById.get(meeting.company_id);
       if (!company) continue;
       const date = meeting.meeting_date || "";
@@ -389,6 +391,11 @@ async function fetchCentralizedDashboardData(startDate) {
       const row = dailyByKey.get(key);
       const type = cleanText(meeting.meeting_type).toLowerCase();
       const status = normalizeCentralMeetingStatus(meeting.status);
+      const note = relatedMeetings.notesByMeeting.get(meeting.id) || null;
+      const activity = relatedMeetings.activitiesByMeeting.get(meeting.id) || null;
+      const pipeline = relatedMeetings.pipelineByMeeting.get(meeting.id) || null;
+      const snapshot = relatedMeetings.snapshotsByMeeting.get(meeting.id) || null;
+      const pipelineStage = cleanText(snapshot?.pipeline_stage || pipeline?.pipeline_stage || pipelineStageFromStatus(meeting.status));
       if (type === "lender") row.lender += 1;
       if (type === "construction") row.meetingsBooked += 1;
       if (status === "No-show") row.noShows += 1;
@@ -403,6 +410,38 @@ async function fetchCentralizedDashboardData(startDate) {
         date,
         monthName: monthNameFromDate(date),
         status,
+        sharedStatusRaw: cleanText(meeting.status || ""),
+        sharedStatusLabel: status,
+        statusSource: cleanText(meeting.status_source || ""),
+        statusUpdatedAt: meeting.status_updated_at || meeting.updated_at || "",
+        updatedBy: cleanText(meeting.updated_by || ""),
+        meetingId: meeting.id || "",
+        meetingType: type || "construction",
+        ghlContactId: cleanText(meeting.ghl_contact_id || ""),
+        ghlOpportunityId: cleanText(meeting.ghl_opportunity_id || ""),
+        ghlAppointmentId: cleanText(meeting.ghl_appointment_id || ""),
+        pipelineStage,
+        pipelineStageLabel: friendlyPipelineStage(pipelineStage, status),
+        pipelineStageSource: snapshot?.pipeline_stage ? "ghl_lead_snapshots" : pipeline?.pipeline_stage ? "closer_pipeline" : "meetings.status",
+        closerName: cleanText(pipeline?.closer_name || snapshot?.assigned_to_name || ""),
+        closerStatus: cleanText(pipeline?.closer_status || ""),
+        followUpDate: pipeline?.follow_up_date || snapshot?.follow_up_date || "",
+        dealValue: toNumber(pipeline?.deal_value || snapshot?.opportunity_value),
+        preApprovedAmount: toNumber(pipeline?.pre_approved_amount),
+        lostReason: cleanText(pipeline?.lost_reason || ""),
+        latestCloserNote: note ? {
+          text: cleanText(note.note_text || ""),
+          type: cleanText(note.note_type || ""),
+          author: cleanText(note.created_by_name || ""),
+          createdAt: note.created_at || ""
+        } : null,
+        latestActivity: activity ? {
+          text: cleanText(activity.activity_text || ""),
+          type: cleanText(activity.activity_type || ""),
+          source: cleanText(activity.activity_source || ""),
+          closerName: cleanText(activity.closer_name || ""),
+          activityAt: activity.activity_at || activity.created_at || ""
+        } : null,
         sourceKey: company.sourceKey,
         sourceName: company.sourceName,
         appointmentSetter: "Data Entry",
@@ -421,6 +460,78 @@ async function fetchCentralizedDashboardData(startDate) {
     console.warn(`Centralized Supabase data was not loaded: ${error.message}`);
     return { dailyRows: [], clients: [], recordsProcessed: 0, error: error.message };
   }
+}
+
+async function fetchMeetingRelatedData(meetingIds) {
+  const empty = {
+    notesByMeeting: new Map(),
+    activitiesByMeeting: new Map(),
+    pipelineByMeeting: new Map(),
+    snapshotsByMeeting: new Map()
+  };
+  const ids = [...new Set(meetingIds.filter(Boolean))];
+  if (!ids.length) return empty;
+
+  const [notes, activities, pipelines, snapshots] = await Promise.all([
+    fetchSupabaseRowsByMeetingIds("meeting_notes", "*", ids, "&order=created_at.desc"),
+    fetchSupabaseRowsByMeetingIds("ghl_activities", "*", ids, "&order=activity_at.desc.nullslast&order=created_at.desc"),
+    fetchSupabaseRowsByMeetingIds("closer_pipeline", "*", ids, "&order=updated_at.desc"),
+    fetchSupabaseRowsByMeetingIds("ghl_lead_snapshots", "*", ids, "&order=updated_at.desc")
+  ]);
+
+  const preferredNoteTypes = new Set(["closer", "follow_up", "ghl_activity", "plaud_meeting"]);
+  for (const note of sortNewest(notes, ["created_at"])) {
+    const meetingId = note.meeting_id;
+    if (!meetingId || empty.notesByMeeting.has(meetingId)) continue;
+    if (!preferredNoteTypes.has(cleanText(note.note_type).toLowerCase())) continue;
+    empty.notesByMeeting.set(meetingId, note);
+  }
+  for (const note of sortNewest(notes, ["created_at"])) {
+    const meetingId = note.meeting_id;
+    if (meetingId && !empty.notesByMeeting.has(meetingId)) empty.notesByMeeting.set(meetingId, note);
+  }
+  for (const activity of sortNewest(activities, ["activity_at", "created_at"])) {
+    const meetingId = activity.meeting_id;
+    if (meetingId && !empty.activitiesByMeeting.has(meetingId)) empty.activitiesByMeeting.set(meetingId, activity);
+  }
+  for (const pipeline of sortNewest(pipelines, ["updated_at", "created_at"])) {
+    const meetingId = pipeline.meeting_id;
+    if (meetingId && !empty.pipelineByMeeting.has(meetingId)) empty.pipelineByMeeting.set(meetingId, pipeline);
+  }
+  for (const snapshot of sortNewest(snapshots, ["updated_at", "synced_at", "created_at"])) {
+    const meetingId = snapshot.meeting_id;
+    if (meetingId && !empty.snapshotsByMeeting.has(meetingId)) empty.snapshotsByMeeting.set(meetingId, snapshot);
+  }
+
+  return empty;
+}
+
+async function fetchSupabaseRowsByMeetingIds(table, select, meetingIds, extra = "") {
+  const rows = [];
+  for (const ids of chunk(meetingIds, 80)) {
+    const endpoint = `/rest/v1/${table}?select=${encodeURIComponent(select)}&meeting_id=in.(${ids.join(",")})${extra}`;
+    try {
+      const payload = await supabaseRequest(endpoint, { method: "GET" });
+      if (Array.isArray(payload)) rows.push(...payload);
+    } catch (error) {
+      console.warn(`Supabase ${table} related rows were not loaded: ${error.message}`);
+    }
+  }
+  return rows;
+}
+
+function sortNewest(rows, fields) {
+  return [...rows].sort((a, b) => newestTime(b, fields) - newestTime(a, fields));
+}
+
+function newestTime(row, fields) {
+  for (const field of fields) {
+    const value = row?.[field];
+    if (!value) continue;
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+  return 0;
 }
 
 async function attachMetaSpend(dailyRows) {
@@ -548,10 +659,46 @@ function normalizeCentralMeetingStatus(value) {
   if (raw === "cerrado") return "Closed";
   if (raw === "no_show") return "No-show";
   if (raw === "atendida") return "Attended";
-  if (raw === "reagendo") return "Reagendo";
-  if (raw === "descalificado") return "Disqualified";
+  if (raw === "reagendo") return "Follow Up";
+  if (raw === "descalificado") return "Not Qualified";
   if (raw === "agendada") return "Scheduled";
   return normalizeStatus(value);
+}
+
+function pipelineStageFromStatus(value) {
+  const raw = cleanText(value).toLowerCase();
+  if (raw === "cerrado") return "closed";
+  if (raw === "no_show") return "no_show";
+  if (raw === "atendida") return "attended";
+  if (raw === "reagendo") return "follow_up";
+  if (raw === "descalificado") return "not_qualified";
+  if (raw === "agendada") return "scheduled";
+  return raw;
+}
+
+function friendlyPipelineStage(value, fallbackStatus = "Unknown") {
+  const raw = cleanText(value).toLowerCase();
+  const labels = {
+    reunion_agendada_oficina: "Scheduled",
+    reunion_agendada_celular: "Scheduled",
+    reunion_para_showing: "Scheduled",
+    no_show: "No Show",
+    contactado_con_tarea: "Need Follow Up",
+    en_proceso_aprobacion: "High Potential / Approved",
+    lead_potencial: "High Potential / Approved",
+    closed: "Closed",
+    not_interested: "Not Interested / Not Qualified",
+    did_not_approve_mortgage_loan: "Not Interested / Not Qualified",
+    contacted: "Need Follow Up",
+    follow_up: "Need Follow Up",
+    proposal: "High Potential / Approved",
+    lost: "Not Interested / Not Qualified",
+    new: "Scheduled",
+    scheduled: "Scheduled",
+    attended: "Attended",
+    not_qualified: "Not Interested / Not Qualified"
+  };
+  return labels[raw] || fallbackStatus || "Unknown";
 }
 
 function monthNameFromDate(value) {

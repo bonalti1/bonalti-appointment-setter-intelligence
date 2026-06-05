@@ -683,6 +683,7 @@ function renderClientNotesSidebar(client) {
       <span>Client</span>
       <strong>${escapeHtml(client.clientName)}</strong>
       <small>${escapeHtml(client.sourceName)} · ${escapeHtml(client.status)} · ${escapeHtml(client.date || "Unknown date")}</small>
+      ${renderCloserMiniSummary(client)}
       <button class="back-link" id="backToClientBtn">Back to client list</button>
     </div>
   `;
@@ -701,12 +702,15 @@ function renderClientNotes(client, payload) {
           <h3>${escapeHtml(client.clientName)}</h3>
           <div class="detail-tags">
             <span>${escapeHtml(client.status)}</span>
+            <span>${escapeHtml(client.pipelineStageLabel || "No sales stage")}</span>
+            <span>${escapeHtml(statusSourceLabel(client.statusSource))}</span>
             <span>${escapeHtml(client.date || "Unknown date")}</span>
             <span>${fmt(notes.length)} note${notes.length === 1 ? "" : "s"}</span>
             <span>${fmt(messages.length)} message${messages.length === 1 ? "" : "s"}</span>
           </div>
         </div>
       </div>
+      ${renderCloserStatusCard(client)}
       <div class="client-activity-tabs">
         <button class="${activeTab === "notes" ? "active" : ""}" data-client-activity-tab="notes">Notes</button>
         <button class="${activeTab === "messages" ? "active" : ""}" data-client-activity-tab="messages">Messages</button>
@@ -1082,11 +1086,100 @@ function callDirectionLabel(item) {
   return "Unknown Call Direction";
 }
 
+function statusSourceLabel(source) {
+  const normalized = String(source || "").toLowerCase();
+  if (normalized === "closer_dashboard") return "Updated by closer";
+  if (normalized === "ghl") return "Updated from GHL";
+  if (normalized === "data_entry") return "Updated from data entry";
+  if (normalized === "setter") return "Updated by setter";
+  return "Shared status";
+}
+
+function formatOptionalDateTime(value, fallback = "No update time") {
+  return value ? formatDateTime(value) : fallback;
+}
+
+function humanLabel(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  if (/^[a-z0-9_-]{16,}$/i.test(text) && !text.includes(" ")) return fallback;
+  return text;
+}
+
+function latestCloserText(client) {
+  const note = client.latestCloserNote;
+  if (note?.text) {
+    const author = humanLabel(note.author);
+    return `${author ? `${author}: ` : ""}${note.text}`;
+  }
+
+  const activity = client.latestActivity;
+  if (activity?.text) return activity.text;
+  return "";
+}
+
+function renderCloserMiniSummary(client) {
+  const noteText = latestCloserText(client);
+  return `
+    <div class="closer-mini-summary">
+      <b>${escapeHtml(client.pipelineStageLabel || client.status || "Unknown")}</b>
+      <span>${escapeHtml(statusSourceLabel(client.statusSource))} · ${escapeHtml(formatOptionalDateTime(client.statusUpdatedAt))}</span>
+      ${noteText ? `<p>${escapeHtml(noteText)}</p>` : ""}
+    </div>
+  `;
+}
+
+function renderCloserStatusCard(client) {
+  const note = client.latestCloserNote;
+  const activity = client.latestActivity;
+  return `
+    <section class="closer-status-card">
+      <div class="closer-status-head">
+        <span>Sales Outcome</span>
+        <strong>${escapeHtml(client.status || "Unknown")}</strong>
+      </div>
+      <div class="closer-status-grid">
+        <div>
+          <span>Detailed Stage</span>
+          <b>${escapeHtml(client.pipelineStageLabel || "No stage yet")}</b>
+        </div>
+        <div>
+          <span>Status Source</span>
+          <b>${escapeHtml(statusSourceLabel(client.statusSource))}</b>
+        </div>
+        <div>
+          <span>Last Updated</span>
+          <b>${escapeHtml(formatOptionalDateTime(client.statusUpdatedAt))}</b>
+        </div>
+        <div>
+          <span>Closer</span>
+          <b>${escapeHtml(humanLabel(client.closerName, humanLabel(client.updatedBy, "Not assigned")))}</b>
+        </div>
+      </div>
+      ${note?.text ? `
+        <div class="closer-status-note">
+          <span>Latest Closer Note</span>
+          <p>${escapeHtml(note.text)}</p>
+          <small>${escapeHtml([humanLabel(note.author), formatOptionalDateTime(note.createdAt, "")].filter(Boolean).join(" · "))}</small>
+        </div>
+      ` : ""}
+      ${activity?.text ? `
+        <div class="closer-status-note">
+          <span>Latest Activity</span>
+          <p>${escapeHtml(activity.text)}</p>
+          <small>${escapeHtml([activity.type || "activity", activity.source, formatOptionalDateTime(activity.activityAt, "")].filter(Boolean).join(" · "))}</small>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
 function renderNoClientTranscriptMatch(client) {
   els.callDetail.innerHTML = `
     <div class="empty-state client-no-match">
       <strong>No saved transcript found for ${escapeHtml(client.clientName)}.</strong>
       <span>${escapeHtml(client.status)} · ${escapeHtml(client.sourceName)} · ${escapeHtml(client.date || "Unknown date")}</span>
+      ${renderCloserStatusCard(client)}
       <p>This client is in the sheet, but there is not a matching saved GHL transcript yet. It may be a no-call record, a different GHL contact name, or a transcript that has not synced yet.</p>
       <button class="back-link" id="backToClientBtn">Back to client list</button>
     </div>
@@ -2457,19 +2550,27 @@ function renderMeetings(clients) {
     return;
   }
 
-  els.meetingList.innerHTML = rows.map((client) => `
+  els.meetingList.innerHTML = rows.map((client) => {
+    const noteText = latestCloserText(client);
+    return `
     <div class="meeting-row ${client.status === "Closed" ? "closed" : ""}">
       <div>
-        <span class="meeting-week">${client.monthName}${client.date ? ` · ${client.date}` : ""}</span>
-        <strong>${client.clientName}</strong>
-        <small>${client.sourceName} · ${client.appointmentSetter}</small>
+        <span class="meeting-week">${escapeHtml(client.monthName)}${client.date ? ` · ${escapeHtml(client.date)}` : ""}</span>
+        <strong>${escapeHtml(client.clientName)}</strong>
+        <small>${escapeHtml(client.sourceName)} · ${escapeHtml(client.appointmentSetter)}</small>
+        <div class="meeting-closer-line">
+          <span>${escapeHtml(client.pipelineStageLabel || "No sales stage")}</span>
+          <small>${escapeHtml(statusSourceLabel(client.statusSource))} · ${escapeHtml(formatOptionalDateTime(client.statusUpdatedAt))}</small>
+        </div>
+        ${noteText ? `<p class="meeting-note-preview">${escapeHtml(noteText)}</p>` : ""}
       </div>
       <div class="meeting-meta">
-        <span>Status</span>
-        <b>${client.status}</b>
+        <span>Sales Outcome</span>
+        <b>${escapeHtml(client.status)}</b>
       </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderChart(container, rows, metric) {
