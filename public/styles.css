@@ -1162,6 +1162,26 @@ input[type="search"] {
   line-height: 1;
 }
 
+.call-analysis-tracker small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.call-analysis-tracker .speed-card {
+  border-top: 3px solid var(--brand-primary);
+}
+
+.call-analysis-tracker .speed-card.late {
+  border-top-color: var(--red);
+}
+
+.call-analysis-tracker .speed-card.late strong {
+  color: var(--red);
+}
+
 .call-analysis-tracker article.wide strong {
   font-size: 14px;
   line-height: 1.25;

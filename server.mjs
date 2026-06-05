@@ -1777,6 +1777,11 @@ async function fetchActivityStats(sourceKey, { from = "", to = "", limit = 500 }
     }
   }
 
+  stats.speedToCall = await fetchSpeedToCallStats(sourceKey, { from, to }).catch((error) => ({
+    ...emptySpeedToCallStats(),
+    error: error.message
+  }));
+
   return {
     ok: true,
     message: `Loaded activity tracker counts for ${from === to ? from : `${from} to ${to}`}.`,
@@ -1794,8 +1799,173 @@ function emptyActivityStats() {
     outboundMessages: 0,
     outboundCalls: 0,
     unknownMessages: 0,
-    unknownCalls: 0
+    unknownCalls: 0,
+    speedToCall: emptySpeedToCallStats()
   };
+}
+
+function emptySpeedToCallStats() {
+  return {
+    tracked: 0,
+    called: 0,
+    waiting: 0,
+    under5: 0,
+    under15: 0,
+    overdue: 0,
+    averageMinutes: null,
+    medianMinutes: null,
+    rows: [],
+    basis: "ghl-stage-change-snapshot"
+  };
+}
+
+async function fetchSpeedToCallStats(sourceKey, { from = "", to = "" } = {}) {
+  if (!hasSupabase()) return emptySpeedToCallStats();
+
+  const companyRows = await supabaseRequest("/rest/v1/companies?select=id,slug,name,active&active=eq.true", { method: "GET" });
+  const companies = (Array.isArray(companyRows) ? companyRows : [])
+    .map((company) => ({ id: company.id, ...normalizeCentralCompany(company) }))
+    .filter((company) => sourceKey === "all" || company.sourceKey === sourceKey);
+  const companyIds = companies.map((company) => company.id).filter(Boolean);
+  if (!companyIds.length) return emptySpeedToCallStats();
+
+  const snapshots = await fetchSupabaseRowsByField(
+    "ghl_lead_snapshots",
+    "id,meeting_id,company_id,ghl_contact_id,pipeline_stage,pipeline_stage_name,meeting_status,last_activity_at,last_note,synced_at,updated_at,raw_payload",
+    "company_id",
+    companyIds,
+    "&order=updated_at.desc"
+  );
+  const pendingRows = snapshots
+    .filter(isPendingCallSnapshot)
+    .map((snapshot) => ({
+      ...snapshot,
+      pendingCallAt: getPendingCallAtFromSnapshot(snapshot)
+    }))
+    .filter((snapshot) => snapshot.ghl_contact_id && snapshot.pendingCallAt)
+    .filter((snapshot) => isWithinDateRange(snapshot.pendingCallAt, from, to));
+
+  if (!pendingRows.length) return emptySpeedToCallStats();
+
+  const contactIds = [...new Set(pendingRows.map((row) => row.ghl_contact_id).filter(Boolean))];
+  const messages = await fetchSupabaseRowsByField(
+    "ghl_messages",
+    "id,contact_id,direction,message_type,call_status,call_duration_seconds,date_added,raw",
+    "contact_id",
+    contactIds,
+    "&order=date_added.asc"
+  );
+  const callsByContact = groupOutboundCallsByContact(messages);
+  const now = new Date();
+  const rows = pendingRows.map((snapshot) => {
+    const pendingAt = new Date(snapshot.pendingCallAt);
+    const firstCall = (callsByContact.get(snapshot.ghl_contact_id) || [])
+      .find((message) => new Date(message.date_added || 0) >= pendingAt);
+    const minutes = firstCall ? minutesBetween(snapshot.pendingCallAt, firstCall.date_added) : null;
+    const waitingMinutes = firstCall ? null : Math.max(0, minutesBetween(snapshot.pendingCallAt, now.toISOString()));
+    return {
+      meetingId: snapshot.meeting_id || "",
+      contactId: snapshot.ghl_contact_id || "",
+      pendingCallAt: snapshot.pendingCallAt,
+      firstCallAt: firstCall?.date_added || "",
+      minutes,
+      waitingMinutes,
+      stage: cleanText(snapshot.pipeline_stage_name || snapshot.pipeline_stage || snapshot.meeting_status || "Pendiente llamada")
+    };
+  });
+  const calledRows = rows.filter((row) => Number.isFinite(row.minutes));
+  const minutes = calledRows.map((row) => row.minutes).sort((a, b) => a - b);
+
+  return {
+    tracked: rows.length,
+    called: calledRows.length,
+    waiting: rows.length - calledRows.length,
+    under5: calledRows.filter((row) => row.minutes <= 5).length,
+    under15: calledRows.filter((row) => row.minutes <= 15).length,
+    overdue: rows.filter((row) => Number.isFinite(row.minutes) ? row.minutes > 15 : (row.waitingMinutes || 0) > 15).length,
+    averageMinutes: minutes.length ? Math.round((minutes.reduce((total, value) => total + value, 0) / minutes.length) * 10) / 10 : null,
+    medianMinutes: median(minutes),
+    rows: rows
+      .sort((a, b) => (b.waitingMinutes || b.minutes || 0) - (a.waitingMinutes || a.minutes || 0))
+      .slice(0, 8),
+    basis: "ghl-stage-change-snapshot"
+  };
+}
+
+function isPendingCallSnapshot(snapshot) {
+  const haystack = [
+    snapshot.pipeline_stage,
+    snapshot.pipeline_stage_name,
+    snapshot.meeting_status,
+    snapshot.last_note
+  ].map((value) => cleanText(value).toLowerCase()).join(" ");
+  return [
+    "pendiente llamada",
+    "pendiente de llamada",
+    "pendiente_llamada",
+    "pendiente-llamada",
+    "pending phone call",
+    "pending call",
+    "pending_call",
+    "pending-call",
+    "call pending"
+  ].some((term) => haystack.includes(term));
+}
+
+function getPendingCallAtFromSnapshot(snapshot) {
+  const raw = snapshot.raw_payload || {};
+  return raw.lastStageChangeAt
+    || raw.lastStatusChangeAt
+    || snapshot.last_activity_at
+    || snapshot.updated_at
+    || snapshot.synced_at
+    || "";
+}
+
+async function fetchSupabaseRowsByField(table, select, field, values, extra = "") {
+  const rows = [];
+  for (const batch of chunk([...new Set(values.filter(Boolean))], 80)) {
+    const endpoint = `/rest/v1/${table}?select=${encodeURIComponent(select)}&${field}=in.(${batch.join(",")})${extra}`;
+    const payload = await supabaseRequest(endpoint, { method: "GET" });
+    if (Array.isArray(payload)) rows.push(...payload);
+  }
+  return rows;
+}
+
+function groupOutboundCallsByContact(messages) {
+  const grouped = new Map();
+  for (const message of messages) {
+    if (!message.contact_id || !message.date_added || !isDbCallMessage(message)) continue;
+    const direction = getMessageDirection(message);
+    if (!direction.includes("outbound")) continue;
+    const rows = grouped.get(message.contact_id) || [];
+    rows.push(message);
+    grouped.set(message.contact_id, rows);
+  }
+  for (const rows of grouped.values()) {
+    rows.sort((a, b) => new Date(a.date_added || 0) - new Date(b.date_added || 0));
+  }
+  return grouped;
+}
+
+function isDbCallMessage(message) {
+  const type = cleanText(message.message_type || message.type || "").toLowerCase();
+  return type.includes("call") || Boolean(message.call_status) || toNumber(message.call_duration_seconds) > 0;
+}
+
+function minutesBetween(start, end) {
+  const startTime = new Date(start).getTime();
+  const endTime = new Date(end).getTime();
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) return null;
+  return Math.max(0, Math.round(((endTime - startTime) / 60000) * 10) / 10);
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2
+    ? values[middle]
+    : Math.round(((values[middle - 1] + values[middle]) / 2) * 10) / 10;
 }
 
 async function fetchLocationActivity(target, { from = "", to = "", limit = 150 } = {}) {

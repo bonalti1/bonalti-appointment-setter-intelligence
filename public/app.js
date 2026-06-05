@@ -1007,6 +1007,7 @@ function renderReviewModeState(visible) {
 function renderCallAnalysisTracker() {
   if (!els.callAnalysisTracker) return;
   const stats = state.activityTracker.stats || buildActivityDirectionStats([]);
+  const speed = stats.speedToCall || emptySpeedToCallStats();
   const label = state.activityTracker.loading
     ? "Loading today"
     : state.activityTracker.label || "Today";
@@ -1015,6 +1016,10 @@ function renderCallAnalysisTracker() {
     <article><span>Incoming Calls</span><strong>${fmt(stats.inboundCalls)}</strong></article>
     <article><span>Outbound Messages</span><strong>${fmt(stats.outboundMessages)}</strong></article>
     <article><span>Outgoing Calls Made</span><strong>${fmt(stats.outboundCalls)}</strong></article>
+    <article class="speed-card"><span>Pendiente llamada</span><strong>${fmt(speed.tracked)}</strong><small>bot ya pidio llamada</small></article>
+    <article class="speed-card"><span>Ya llamados</span><strong>${fmt(speed.called)}</strong><small>${fmt(speed.under15)} en menos de 15 min</small></article>
+    <article class="speed-card"><span>Promedio para llamar</span><strong>${formatMinutes(speed.averageMinutes)}</strong><small>desde pendiente llamada</small></article>
+    <article class="speed-card ${speed.overdue ? "late" : ""}"><span>Tarde / sin llamada</span><strong>${fmt(speed.overdue)}</strong><small>mas de 15 min</small></article>
     <article class="wide"><span>${escapeHtml(label)} · Last saved</span><strong>${escapeHtml(state.latestSavedLabel)}</strong></article>
   `;
 }
@@ -1063,7 +1068,7 @@ function filterItemsByTranscriptDate(items) {
 }
 
 function buildActivityDirectionStats(items) {
-  const stats = { inboundMessages: 0, inboundCalls: 0, outboundMessages: 0, outboundCalls: 0 };
+  const stats = { inboundMessages: 0, inboundCalls: 0, outboundMessages: 0, outboundCalls: 0, speedToCall: emptySpeedToCallStats() };
   for (const item of items) {
     const direction = String(item.direction || "").toLowerCase();
     const inbound = direction.includes("inbound");
@@ -1077,6 +1082,26 @@ function buildActivityDirectionStats(items) {
     }
   }
   return stats;
+}
+
+function emptySpeedToCallStats() {
+  return {
+    tracked: 0,
+    called: 0,
+    waiting: 0,
+    under15: 0,
+    overdue: 0,
+    averageMinutes: null
+  };
+}
+
+function formatMinutes(value) {
+  if (!Number.isFinite(Number(value))) return "--";
+  const minutes = Number(value);
+  if (minutes < 60) return `${minutes % 1 ? minutes.toFixed(1) : Math.round(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = Math.round(minutes % 60);
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
 function callDirectionLabel(item) {
