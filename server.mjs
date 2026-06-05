@@ -1765,7 +1765,22 @@ async function fetchDailyActivity(sourceKey, { from = "", to = "", limit = 150 }
 }
 
 async function fetchActivityStats(sourceKey, { from = "", to = "", limit = 500 } = {}) {
-  const data = await fetchDailyActivity(sourceKey, { from, to, limit });
+  let data = await fetchDailyActivity(sourceKey, { from, to, limit }).catch((error) => ({
+    ok: false,
+    message: error.message,
+    activity: []
+  }));
+  if ((data.ok === false || !(data.activity || []).length) && hasSupabase()) {
+    const fallbackActivity = await fetchStoredCallActivity(sourceKey, { from, to, limit }).catch(() => []);
+    if (fallbackActivity.length) {
+      data = {
+        ok: true,
+        message: `Loaded ${fallbackActivity.length} saved call${fallbackActivity.length === 1 ? "" : "s"} from Supabase because live GHL activity was unavailable.`,
+        activity: fallbackActivity,
+        fallback: "supabase-saved-calls"
+      };
+    }
+  }
   if (data.ok === false) return { ...data, stats: emptyActivityStats(), from, to };
 
   const stats = emptyActivityStats();
@@ -1799,6 +1814,44 @@ async function fetchActivityStats(sourceKey, { from = "", to = "", limit = 500 }
     recordsProcessed: (data.activity || []).length,
     stats
   };
+}
+
+async function fetchStoredCallActivity(sourceKey, { from = "", to = "", limit = 500 } = {}) {
+  const sourceKeys = sourceKey === "all"
+    ? Object.keys(config.ghlLocations)
+    : [sourceKey];
+  const params = new URLSearchParams({
+    select: "ghl_message_id,contact_id,conversation_id,source_key,source_name,client_name,message_type,call_status,call_duration_seconds,date_added",
+    order: "date_added.desc",
+    limit: String(limit || 500)
+  });
+  if (sourceKeys.length === 1) {
+    params.set("source_key", `eq.${sourceKeys[0]}`);
+  } else {
+    params.set("source_key", `in.(${sourceKeys.join(",")})`);
+  }
+  if (from) params.set("date_added", `gte.${from}T00:00:00`);
+  if (to) params.append("date_added", `lte.${to}T23:59:59`);
+
+  const rows = await supabaseRequest(`/rest/v1/conversation_transcripts?${params.toString()}`, { method: "GET" });
+  const activity = (Array.isArray(rows) ? rows : []).map((row) => ({
+    id: row.ghl_message_id || "",
+    messageId: row.ghl_message_id || "",
+    contactId: row.contact_id || "",
+    conversationId: row.conversation_id || "",
+    sourceKey: row.source_key || "",
+    sourceName: row.source_name || sourceNameForKey(row.source_key || ""),
+    clientName: row.client_name || "Unknown client",
+    kind: "call",
+    messageType: row.message_type || "",
+    dateAdded: row.date_added || "",
+    direction: "",
+    callStatus: row.call_status || "",
+    callDurationSeconds: row.call_duration_seconds || 0
+  })).filter((item) => item.messageId && item.dateAdded);
+
+  await attachMessageDirections(activity);
+  return activity;
 }
 
 function emptyActivityStats() {
